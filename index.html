@@ -1,451 +1,745 @@
-import React, { useState, useMemo } from 'react';
-import Papa from 'papaparse';
-import { Upload } from 'lucide-react';
-
-const AlluvialChart = () => {
-  const [selectedDoenca, setSelectedDoenca] = useState(null);
-  const [selectedProblema, setSelectedProblema] = useState(null);
-  const [tooltip, setTooltip] = useState(null);
-  const [csvData, setCsvData] = useState(null);
-  const [error, setError] = useState(null);
-
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    setError(null);
-    
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        if (results.data && results.data.length > 0) {
-          const firstRow = results.data[0];
-          const requiredColumns = ['ad_id', 'produto_tratamento_comercializado', 'tipos_problemas_de_saude', 'tipos_problemas_de_saude_agrup'];
-          const hasAllColumns = requiredColumns.every(col => col in firstRow);
-          
-          if (!hasAllColumns) {
-            setError('O CSV deve conter as colunas: ad_id, produto_tratamento_comercializado, tipos_problemas_de_saude, tipos_problemas_de_saude_agrup');
-            return;
-          }
-          
-          setCsvData(results.data);
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Análise de Produtos de Saúde - Gráfico Alluvial</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-      },
-      error: (err) => {
-        setError(`Erro ao ler o arquivo: ${err.message}`);
-      }
-    });
-  };
 
-  const processedData = useMemo(() => {
-    if (!csvData) return [];
-    
-    const flows = [];
-    
-    csvData.forEach(row => {
-      const problemas = row.tipos_problemas_de_saude.split(';').map(p => p.trim());
-      const doencas = row.tipos_problemas_de_saude_agrup.split(';').map(d => d.trim());
-      const produto = row.produto_tratamento_comercializado.trim();
-      
-      problemas.forEach((problema, idx) => {
-        if (problema && doencas[idx] && produto) {
-          flows.push({
-            doenca: doencas[idx],
-            problema: problema,
-            produto: produto
-          });
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #EFF6FF 0%, #E0E7FF 100%);
+            min-height: 100vh;
+            padding: 2rem;
         }
-      });
-    });
-    
-    return flows;
-  }, [csvData]);
 
-  const aggregatedData = useMemo(() => {
-    const counts = {};
-    
-    processedData.forEach(flow => {
-      const key = `${flow.doenca}|||${flow.problema}|||${flow.produto}`;
-      counts[key] = (counts[key] || 0) + 1;
-    });
-    
-    return Object.entries(counts).map(([key, count]) => {
-      const [doenca, problema, produto] = key.split('|||');
-      return { doenca, problema, produto, count };
-    });
-  }, [processedData]);
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
 
-  const filteredData = useMemo(() => {
-    return aggregatedData.filter(d => {
-      if (selectedDoenca && d.doenca !== selectedDoenca) return false;
-      if (selectedProblema && d.problema !== selectedProblema) return false;
-      return true;
-    });
-  }, [aggregatedData, selectedDoenca, selectedProblema]);
+        .upload-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 80vh;
+        }
 
-  const flowPositions = useMemo(() => {
-    const doencaFlows = {};
-    const problemaFlows = {};
-    const produtoFlows = {};
-    
-    filteredData.forEach(flow => {
-      if (!doencaFlows[flow.doenca]) doencaFlows[flow.doenca] = 0;
-      if (!problemaFlows[flow.problema]) problemaFlows[flow.problema] = 0;
-      if (!produtoFlows[flow.produto]) produtoFlows[flow.produto] = 0;
-    });
-    
-    const flows = filteredData.map(flow => {
-      const doencaStart = doencaFlows[flow.doenca];
-      const problemaStart = problemaFlows[flow.problema];
-      const produtoStart = produtoFlows[flow.produto];
-      
-      doencaFlows[flow.doenca] += flow.count;
-      problemaFlows[flow.problema] += flow.count;
-      produtoFlows[flow.produto] += flow.count;
-      
-      return {
-        ...flow,
-        doencaStart,
-        problemaStart,
-        produtoStart
-      };
-    });
-    
-    return flows;
-  }, [filteredData]);
+        .upload-box {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+            padding: 3rem;
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
 
-  const doencas = useMemo(() => {
-    const map = {};
-    filteredData.forEach(d => {
-      map[d.doenca] = (map[d.doenca] || 0) + d.count;
-    });
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [filteredData]);
+        .upload-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 2rem;
+            background: #3B82F6;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 2.5rem;
+        }
 
-  const problemas = useMemo(() => {
-    const map = {};
-    filteredData.forEach(d => {
-      map[d.problema] = (map[d.problema] || 0) + d.count;
-    });
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [filteredData]);
+        h1 {
+            font-size: 2rem;
+            color: #1F2937;
+            margin-bottom: 1rem;
+        }
 
-  const produtos = useMemo(() => {
-    const map = {};
-    filteredData.forEach(d => {
-      map[d.produto] = (map[d.produto] || 0) + d.count;
-    });
-    return Object.entries(map).map(([name, value]) => ({ name, value }));
-  }, [filteredData]);
+        .subtitle {
+            color: #6B7280;
+            margin-bottom: 2rem;
+        }
 
-  const totalDoenca = doencas.reduce((sum, d) => sum + d.value, 0);
-  const totalProblema = problemas.reduce((sum, d) => sum + d.value, 0);
-  const totalProduto = produtos.reduce((sum, d) => sum + d.value, 0);
+        .info-box {
+            background: #EFF6FF;
+            border: 2px solid #BFDBFE;
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            text-align: left;
+        }
 
-  const colors = {
-    doenca: ['#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'],
-    problema: ['#10b981', '#059669', '#047857', '#065f46', '#064e3b'],
-    produto: ['#f59e0b', '#d97706', '#b45309', '#92400e', '#78350f']
-  };
+        .info-box h3 {
+            color: #1E40AF;
+            margin-bottom: 1rem;
+        }
 
-  const getColor = (type, index) => {
-    return colors[type][index % colors[type].length];
-  };
+        .info-box ul {
+            list-style: none;
+            color: #1E40AF;
+        }
 
-  const drawFlow = (x1, y1, h1, x2, y2, h2, color, opacity = 0.4) => {
-    const midX = (x1 + x2) / 2;
-    return (
-      <path
-        d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2} L ${x2} ${y2 + h2} C ${midX} ${y2 + h2}, ${midX} ${y1 + h1}, ${x1} ${y1 + h1} Z`}
-        fill={color}
-        opacity={opacity}
-        className="transition-all duration-300"
-      />
-    );
-  };
+        .info-box li {
+            margin: 0.5rem 0;
+            font-size: 0.9rem;
+        }
 
-  const width = 1200;
-  const height = 800;
-  const colWidth = 150;
-  const colSpacing = 300;
-  const padding = 50;
+        .error-box {
+            background: #FEF2F2;
+            border: 2px solid #FECACA;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            color: #991B1B;
+        }
 
-  let doencaY = padding;
-  const doencaPositions = doencas.map((d, i) => {
-    const h = (d.value / totalDoenca) * (height - 2 * padding);
-    const pos = { name: d.name, y: doencaY, height: h, color: getColor('doenca', i) };
-    doencaY += h + 5;
-    return pos;
-  });
+        .btn-upload {
+            background: #3B82F6;
+            color: white;
+            padding: 1rem 2rem;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
 
-  let problemaY = padding;
-  const problemaPositions = problemas.map((p, i) => {
-    const h = (p.value / totalProblema) * (height - 2 * padding);
-    const pos = { name: p.name, y: problemaY, height: h, color: getColor('problema', i) };
-    problemaY += h + 5;
-    return pos;
-  });
+        .btn-upload:hover {
+            background: #2563EB;
+            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.3);
+        }
 
-  let produtoY = padding;
-  const produtoPositions = produtos.map((p, i) => {
-    const h = (p.value / totalProduto) * (height - 2 * padding);
-    const pos = { name: p.name, y: produtoY, height: h, color: getColor('produto', i) };
-    produtoY += h + 5;
-    return pos;
-  });
+        .hidden {
+            display: none;
+        }
 
-  if (!csvData) {
-    return (
-      <div className="w-full h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-8">
-        <div className="bg-white rounded-2xl shadow-2xl p-12 max-w-2xl w-full">
-          <div className="text-center">
-            <Upload className="w-20 h-20 mx-auto text-blue-500 mb-6" />
-            <h1 className="text-3xl font-bold text-gray-800 mb-4">
-              Análise de Produtos de Saúde
-            </h1>
-            <p className="text-gray-600 mb-8">
-              Faça upload do seu arquivo CSV para visualizar o gráfico alluvial interativo
-            </p>
-            
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-8 text-left">
-              <h3 className="font-bold text-blue-900 mb-3">Formato do CSV requerido:</h3>
-              <ul className="text-sm text-blue-800 space-y-2">
-                <li>• <strong>ad_id</strong>: ID da etiqueta</li>
-                <li>• <strong>produto_tratamento_comercializado</strong>: Nome do produto</li>
-                <li>• <strong>tipos_problemas_de_saude</strong>: Problemas de saúde (separados por ;)</li>
-                <li>• <strong>tipos_problemas_de_saude_agrup</strong>: Tipos de doenças (separados por ;)</li>
-              </ul>
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .filters {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-clear {
+            background: #4B5563;
+            color: white;
+        }
+
+        .btn-clear:hover {
+            background: #374151;
+        }
+
+        .filter-tag {
+            background: #DBEAFE;
+            color: #1E40AF;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .filter-tag.problema {
+            background: #D1FAE5;
+            color: #065F46;
+        }
+
+        .filter-tag button {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            overflow-x: auto;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        .stat-box {
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+        }
+
+        .stat-box.doenca {
+            background: #EFF6FF;
+        }
+
+        .stat-box.problema {
+            background: #D1FAE5;
+        }
+
+        .stat-box.produto {
+            background: #FEF3C7;
+        }
+
+        .stat-box h3 {
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-box.doenca h3 { color: #1E3A8A; }
+        .stat-box.problema h3 { color: #065F46; }
+        .stat-box.produto h3 { color: #92400E; }
+
+        .stat-box.doenca p { color: #1E40AF; }
+        .stat-box.problema p { color: #047857; }
+        .stat-box.produto p { color: #B45309; }
+
+        .tooltip {
+            position: fixed;
+            background: #1F2937;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            pointer-events: none;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        svg text {
+            user-select: none;
+        }
+
+        svg text.clickable {
+            cursor: pointer;
+            transition: fill 0.3s;
+        }
+
+        svg text.clickable:hover {
+            fill: #2563EB;
+        }
+
+        svg rect {
+            transition: opacity 0.3s;
+        }
+
+        svg rect:hover {
+            opacity: 0.8;
+        }
+
+        svg path {
+            transition: opacity 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="uploadScreen" class="upload-screen">
+            <div class="upload-box">
+                <div class="upload-icon">📊</div>
+                <h1>Análise de Produtos de Saúde</h1>
+                <p class="subtitle">Faça upload do seu arquivo CSV para visualizar o gráfico alluvial interativo</p>
+                
+                <div class="info-box">
+                    <h3>Formato do CSV requerido:</h3>
+                    <ul>
+                        <li>• <strong>ad_id</strong>: ID da etiqueta</li>
+                        <li>• <strong>produto_tratamento_comercializado</strong>: Nome do produto</li>
+                        <li>• <strong>tipos_problemas_de_saude</strong>: Problemas de saúde (separados por ;)</li>
+                        <li>• <strong>tipos_problemas_de_saude_agrup</strong>: Tipos de doenças (separados por ;)</li>
+                    </ul>
+                </div>
+
+                <div id="errorBox" class="error-box hidden"></div>
+                
+                <label for="fileInput">
+                    <span class="btn-upload">
+                        📁 Selecionar Arquivo CSV
+                    </span>
+                </label>
+                <input type="file" id="fileInput" accept=".csv" class="hidden">
+            </div>
+        </div>
+
+        <div id="chartScreen" class="hidden">
+            <div class="header">
+                <h1>Análise de Produtos de Saúde</h1>
+                <label for="fileInputChart">
+                    <span class="btn-upload">
+                        📁 Carregar Novo CSV
+                    </span>
+                </label>
+                <input type="file" id="fileInputChart" accept=".csv" class="hidden">
             </div>
 
-            {error && (
-              <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
-                <p className="text-red-700 text-sm">{error}</p>
-              </div>
-            )}
-            
-            <label className="inline-block">
-              <input
-                type="file"
-                accept=".csv"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <span className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-8 py-4 rounded-lg cursor-pointer inline-flex items-center gap-3 transition shadow-lg hover:shadow-xl">
-                <Upload className="w-5 h-5" />
-                Selecionar Arquivo CSV
-              </span>
-            </label>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full h-screen bg-gray-50 p-8 overflow-auto">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h1 className="text-3xl font-bold text-gray-800">
-            Análise de Produtos de Saúde
-          </h1>
-          <label>
-            <input
-              type="file"
-              accept=".csv"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
-            <span className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg cursor-pointer inline-flex items-center gap-2 transition text-sm">
-              <Upload className="w-4 h-4" />
-              Carregar Novo CSV
-            </span>
-          </label>
-        </div>
-        
-        <div className="flex gap-4 mb-6">
-          <button
-            onClick={() => { setSelectedDoenca(null); setSelectedProblema(null); }}
-            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
-          >
-            Limpar Filtros
-          </button>
-          
-          {selectedDoenca && (
-            <div className="px-4 py-2 bg-blue-100 text-blue-800 rounded flex items-center gap-2">
-              Doença: {selectedDoenca}
-              <button onClick={() => setSelectedDoenca(null)} className="font-bold">×</button>
+            <div class="filters">
+                <button class="btn btn-clear" onclick="clearFilters()">Limpar Filtros</button>
+                <div id="filterTags"></div>
             </div>
-          )}
-          
-          {selectedProblema && (
-            <div className="px-4 py-2 bg-green-100 text-green-800 rounded flex items-center gap-2">
-              Problema: {selectedProblema}
-              <button onClick={() => setSelectedProblema(null)} className="font-bold">×</button>
+
+            <div class="chart-container">
+                <svg id="chart" width="1200" height="800"></svg>
             </div>
-          )}
-        </div>
 
-        <div className="bg-white rounded-lg shadow-lg p-6 overflow-x-auto">
-          <svg width={width} height={height} className="mx-auto">
-            {flowPositions.map((flow, i) => {
-              const doencaPos = doencaPositions.find(d => d.name === flow.doenca);
-              const problemaPos = problemaPositions.find(p => p.name === flow.problema);
-              const produtoPos = produtoPositions.find(p => p.name === flow.produto);
-              
-              if (!doencaPos || !problemaPos || !produtoPos) return null;
-              
-              const h1 = (flow.count / totalDoenca) * (height - 2 * padding);
-              const h2 = (flow.count / totalProblema) * (height - 2 * padding);
-              const h3 = (flow.count / totalProduto) * (height - 2 * padding);
-              
-              const doencaY = doencaPos.y + (flow.doencaStart / totalDoenca) * (height - 2 * padding);
-              const problemaY = problemaPos.y + (flow.problemaStart / totalProblema) * (height - 2 * padding);
-              const produtoY = produtoPos.y + (flow.produtoStart / totalProduto) * (height - 2 * padding);
-              
-              return (
-                <g key={i}>
-                  {drawFlow(
-                    colSpacing, doencaY, h1,
-                    colSpacing * 2, problemaY, h2,
-                    doencaPos.color
-                  )}
-                  {drawFlow(
-                    colSpacing * 2 + colWidth, problemaY, h2,
-                    colSpacing * 3 + colWidth, produtoY, h3,
-                    problemaPos.color
-                  )}
-                </g>
-              );
-            })}
-            
-            {doencaPositions.map((d, i) => (
-              <g key={`doenca-${i}`}>
-                <rect
-                  x={colSpacing - colWidth}
-                  y={d.y}
-                  width={colWidth}
-                  height={d.height}
-                  fill={d.color}
-                  className="cursor-pointer hover:opacity-80 transition"
-                  onClick={() => setSelectedDoenca(selectedDoenca === d.name ? null : d.name)}
-                  onMouseEnter={(e) => setTooltip({ 
-                    x: e.clientX, 
-                    y: e.clientY, 
-                    text: `${d.name}: ${doencas.find(x => x.name === d.name)?.value || 0} etiquetas` 
-                  })}
-                  onMouseLeave={() => setTooltip(null)}
-                />
-                <text
-                  x={colSpacing - colWidth - 10}
-                  y={d.y + d.height / 2}
-                  textAnchor="end"
-                  dominantBaseline="middle"
-                  className="text-xs fill-gray-700 font-medium pointer-events-none"
-                >
-                  {d.name}
-                </text>
-              </g>
-            ))}
-            
-            {problemaPositions.map((p, i) => (
-              <g key={`problema-${i}`}>
-                <rect
-                  x={colSpacing * 2}
-                  y={p.y}
-                  width={colWidth}
-                  height={p.height}
-                  fill={p.color}
-                  className="cursor-pointer hover:opacity-80 transition"
-                  onClick={() => setSelectedProblema(selectedProblema === p.name ? null : p.name)}
-                  onMouseEnter={(e) => setTooltip({ 
-                    x: e.clientX, 
-                    y: e.clientY, 
-                    text: `${p.name}: ${problemas.find(x => x.name === p.name)?.value || 0} etiquetas` 
-                  })}
-                  onMouseLeave={() => setTooltip(null)}
-                />
-                <text
-                  x={colSpacing * 2 + colWidth / 2}
-                  y={p.y + p.height / 2}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  className="text-xs fill-white font-medium pointer-events-none"
-                >
-                  {p.name.length > 20 ? p.name.substring(0, 18) + '...' : p.name}
-                </text>
-              </g>
-            ))}
-            
-            {produtoPositions.map((p, i) => (
-              <g key={`produto-${i}`}>
-                <rect
-                  x={colSpacing * 3 + colWidth}
-                  y={p.y}
-                  width={colWidth}
-                  height={p.height}
-                  fill={p.color}
-                  className="hover:opacity-80 transition cursor-pointer"
-                  onMouseEnter={(e) => setTooltip({ 
-                    x: e.clientX, 
-                    y: e.clientY, 
-                    text: `${p.name}: ${produtos.find(x => x.name === p.name)?.value || 0} etiquetas` 
-                  })}
-                  onMouseLeave={() => setTooltip(null)}
-                />
-                <text
-                  x={colSpacing * 3 + colWidth * 2 + 10}
-                  y={p.y + p.height / 2}
-                  textAnchor="start"
-                  dominantBaseline="middle"
-                  className="text-xs fill-gray-700 font-medium pointer-events-none"
-                >
-                  {p.name}
-                </text>
-              </g>
-            ))}
-            
-            <text x={colSpacing - colWidth / 2} y={20} textAnchor="middle" className="text-sm font-bold fill-gray-800">
-              Tipo de Doença
-            </text>
-            <text x={colSpacing * 2 + colWidth / 2} y={20} textAnchor="middle" className="text-sm font-bold fill-gray-800">
-              Problema de Saúde
-            </text>
-            <text x={colSpacing * 3 + colWidth * 1.5} y={20} textAnchor="middle" className="text-sm font-bold fill-gray-800">
-              Produto
-            </text>
-          </svg>
+            <div class="stats">
+                <div class="stat-box doenca">
+                    <h3>Tipos de Doença</h3>
+                    <p id="doencaCount">Total: 0 categorias</p>
+                </div>
+                <div class="stat-box problema">
+                    <h3>Problemas de Saúde</h3>
+                    <p id="problemaCount">Total: 0 tipos</p>
+                </div>
+                <div class="stat-box produto">
+                    <h3>Produtos</h3>
+                    <p id="produtoCount">Total: 0 produtos</p>
+                </div>
+            </div>
         </div>
-
-        <div className="mt-6 grid grid-cols-3 gap-4 text-sm">
-          <div className="bg-blue-50 p-4 rounded">
-            <h3 className="font-bold text-blue-900 mb-2">Tipos de Doença</h3>
-            <p className="text-blue-700">Total: {doencas.length} categorias</p>
-          </div>
-          <div className="bg-green-50 p-4 rounded">
-            <h3 className="font-bold text-green-900 mb-2">Problemas de Saúde</h3>
-            <p className="text-green-700">Total: {problemas.length} tipos</p>
-          </div>
-          <div className="bg-orange-50 p-4 rounded">
-            <h3 className="font-bold text-orange-900 mb-2">Produtos</h3>
-            <p className="text-orange-700">Total: {produtos.length} produtos</p>
-          </div>
-        </div>
-      </div>
-      
-      {tooltip && (
-        <div
-          className="fixed bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg text-sm pointer-events-none z-50"
-          style={{
-            left: tooltip.x + 10,
-            top: tooltip.y + 10,
-          }}
-        >
-          {tooltip.text}
-        </div>
-      )}
     </div>
-  );
-};
 
-export default AlluvialChart;
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <script>
+        let csvData = null;
+        let selectedDoenca = null;
+        let selectedProblema = null;
+        let sortDoenca = false;
+        let sortProblema = false;
+        let sortProduto = false;
+
+        const colors = {
+            doenca: ['#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'],
+            problema: ['#10b981', '#059669', '#047857', '#065f46', '#064e3b'],
+            produto: ['#f59e0b', '#d97706', '#b45309', '#92400e', '#78350f']
+        };
+
+        function getColor(type, index) {
+            return colors[type][index % colors[type].length];
+        }
+
+        function showError(message) {
+            const errorBox = document.getElementById('errorBox');
+            errorBox.textContent = message;
+            errorBox.classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('errorBox').classList.add('hidden');
+        }
+
+        function handleFileUpload(file) {
+            if (!file) return;
+            hideError();
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: (results) => {
+                    if (results.data && results.data.length > 0) {
+                        const firstRow = results.data[0];
+                        const requiredColumns = ['ad_id', 'produto_tratamento_comercializado', 'tipos_problemas_de_saude', 'tipos_problemas_de_saude_agrup'];
+                        const hasAllColumns = requiredColumns.every(col => col in firstRow);
+                        
+                        if (!hasAllColumns) {
+                            showError('O CSV deve conter as colunas: ad_id, produto_tratamento_comercializado, tipos_problemas_de_saude, tipos_problemas_de_saude_agrup');
+                            return;
+                        }
+                        
+                        csvData = results.data;
+                        selectedDoenca = null;
+                        selectedProblema = null;
+                        sortDoenca = false;
+                        sortProblema = false;
+                        sortProduto = false;
+                        document.getElementById('uploadScreen').classList.add('hidden');
+                        document.getElementById('chartScreen').classList.remove('hidden');
+                        renderChart();
+                    }
+                },
+                error: (err) => {
+                    showError(`Erro ao ler o arquivo: ${err.message}`);
+                }
+            });
+        }
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            handleFileUpload(e.target.files[0]);
+        });
+
+        document.getElementById('fileInputChart').addEventListener('change', (e) => {
+            handleFileUpload(e.target.files[0]);
+        });
+
+        function processData() {
+            const flows = [];
+            
+            csvData.forEach(row => {
+                const problemas = row.tipos_problemas_de_saude.split(';').map(p => p.trim());
+                const doencas = row.tipos_problemas_de_saude_agrup.split(';').map(d => d.trim());
+                const produto = row.produto_tratamento_comercializado.trim();
+                
+                problemas.forEach((problema, idx) => {
+                    if (problema && doencas[idx] && produto) {
+                        flows.push({
+                            doenca: doencas[idx],
+                            problema: problema,
+                            produto: produto
+                        });
+                    }
+                });
+            });
+            
+            return flows;
+        }
+
+        function aggregateData(flows) {
+            const counts = {};
+            
+            flows.forEach(flow => {
+                const key = `${flow.doenca}|||${flow.problema}|||${flow.produto}`;
+                counts[key] = (counts[key] || 0) + 1;
+            });
+            
+            return Object.entries(counts).map(([key, count]) => {
+                const [doenca, problema, produto] = key.split('|||');
+                return { doenca, problema, produto, count };
+            });
+        }
+
+        function filterData(data) {
+            return data.filter(d => {
+                if (selectedDoenca && d.doenca !== selectedDoenca) return false;
+                if (selectedProblema && d.problema !== selectedProblema) return false;
+                return true;
+            });
+        }
+
+        function getCategoryData(filteredData, category) {
+            const map = {};
+            filteredData.forEach(d => {
+                map[d[category]] = (map[d[category]] || 0) + d.count;
+            });
+            let result = Object.entries(map).map(([name, value]) => ({ name, value }));
+            
+            if ((category === 'doenca' && sortDoenca) || 
+                (category === 'problema' && sortProblema) || 
+                (category === 'produto' && sortProduto)) {
+                result.sort((a, b) => b.value - a.value);
+            }
+            
+            return result;
+        }
+
+        function calculateFlowPositions(filteredData) {
+            const doencaFlows = {};
+            const problemaFlows = {};
+            const produtoFlows = {};
+            
+            filteredData.forEach(flow => {
+                if (!doencaFlows[flow.doenca]) doencaFlows[flow.doenca] = 0;
+                if (!problemaFlows[flow.problema]) problemaFlows[flow.problema] = 0;
+                if (!produtoFlows[flow.produto]) produtoFlows[flow.produto] = 0;
+            });
+            
+            return filteredData.map(flow => {
+                const doencaStart = doencaFlows[flow.doenca];
+                const problemaStart = problemaFlows[flow.problema];
+                const produtoStart = produtoFlows[flow.produto];
+                
+                doencaFlows[flow.doenca] += flow.count;
+                problemaFlows[flow.problema] += flow.count;
+                produtoFlows[flow.produto] += flow.count;
+                
+                return {
+                    ...flow,
+                    doencaStart,
+                    problemaStart,
+                    produtoStart
+                };
+            });
+        }
+
+        function drawFlow(x1, y1, h1, x2, y2, h2, color) {
+            const midX = (x1 + x2) / 2;
+            return `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2} L ${x2} ${y2 + h2} C ${midX} ${y2 + h2}, ${midX} ${y1 + h1}, ${x1} ${y1 + h1} Z`;
+        }
+
+        function showTooltip(x, y, text) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.textContent = text;
+            tooltip.style.left = (x + 10) + 'px';
+            tooltip.style.top = (y + 10) + 'px';
+            tooltip.classList.remove('hidden');
+        }
+
+        function hideTooltip() {
+            document.getElementById('tooltip').classList.add('hidden');
+        }
+
+        function clearFilters() {
+            selectedDoenca = null;
+            selectedProblema = null;
+            renderChart();
+        }
+
+        function updateFilterTags() {
+            const container = document.getElementById('filterTags');
+            container.innerHTML = '';
+            
+            if (selectedDoenca) {
+                const tag = document.createElement('div');
+                tag.className = 'filter-tag';
+                tag.innerHTML = `Doença: ${selectedDoenca} <button onclick="selectedDoenca = null; renderChart()">×</button>`;
+                container.appendChild(tag);
+            }
+            
+            if (selectedProblema) {
+                const tag = document.createElement('div');
+                tag.className = 'filter-tag problema';
+                tag.innerHTML = `Problema: ${selectedProblema} <button onclick="selectedProblema = null; renderChart()">×</button>`;
+                container.appendChild(tag);
+            }
+        }
+
+        function renderChart() {
+            const flows = processData();
+            const aggregated = aggregateData(flows);
+            const filtered = filterData(aggregated);
+            const flowPositions = calculateFlowPositions(filtered);
+            
+            const doencas = getCategoryData(filtered, 'doenca');
+            const problemas = getCategoryData(filtered, 'problema');
+            const produtos = getCategoryData(filtered, 'produto');
+            
+            const totalDoenca = doencas.reduce((sum, d) => sum + d.value, 0);
+            const totalProblema = problemas.reduce((sum, d) => sum + d.value, 0);
+            const totalProduto = produtos.reduce((sum, d) => sum + d.value, 0);
+            
+            document.getElementById('doencaCount').textContent = `Total: ${doencas.length} categorias`;
+            document.getElementById('problemaCount').textContent = `Total: ${problemas.length} tipos`;
+            document.getElementById('produtoCount').textContent = `Total: ${produtos.length} produtos`;
+            
+            updateFilterTags();
+            
+            const width = 1200;
+            const height = 800;
+            const colWidth = 150;
+            const colSpacing = 300;
+            const padding = 50;
+            
+            let doencaY = padding;
+            const doencaPositions = doencas.map((d, i) => {
+                const h = (d.value / totalDoenca) * (height - 2 * padding);
+                const pos = { name: d.name, y: doencaY, height: h, color: getColor('doenca', i) };
+                doencaY += h + 5;
+                return pos;
+            });
+            
+            let problemaY = padding;
+            const problemaPositions = problemas.map((p, i) => {
+                const h = (p.value / totalProblema) * (height - 2 * padding);
+                const pos = { name: p.name, y: problemaY, height: h, color: getColor('problema', i) };
+                problemaY += h + 5;
+                return pos;
+            });
+            
+            let produtoY = padding;
+            const produtoPositions = produtos.map((p, i) => {
+                const h = (p.value / totalProduto) * (height - 2 * padding);
+                const pos = { name: p.name, y: produtoY, height: h, color: getColor('produto', i) };
+                produtoY += h + 5;
+                return pos;
+            });
+            
+            const svg = document.getElementById('chart');
+            svg.innerHTML = '';
+            
+            // Draw flows
+            flowPositions.forEach(flow => {
+                const doencaPos = doencaPositions.find(d => d.name === flow.doenca);
+                const problemaPos = problemaPositions.find(p => p.name === flow.problema);
+                const produtoPos = produtoPositions.find(p => p.name === flow.produto);
+                
+                if (!doencaPos || !problemaPos || !produtoPos) return;
+                
+                const h1 = (flow.count / totalDoenca) * (height - 2 * padding);
+                const h2 = (flow.count / totalProblema) * (height - 2 * padding);
+                const h3 = (flow.count / totalProduto) * (height - 2 * padding);
+                
+                const doencaY = doencaPos.y + (flow.doencaStart / totalDoenca) * (height - 2 * padding);
+                const problemaY = problemaPos.y + (flow.problemaStart / totalProblema) * (height - 2 * padding);
+                const produtoY = produtoPos.y + (flow.produtoStart / totalProduto) * (height - 2 * padding);
+                
+                const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path1.setAttribute('d', drawFlow(colSpacing, doencaY, h1, colSpacing * 2, problemaY, h2));
+                path1.setAttribute('fill', doencaPos.color);
+                path1.setAttribute('opacity', '0.4');
+                svg.appendChild(path1);
+                
+                const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path2.setAttribute('d', drawFlow(colSpacing * 2 + colWidth, problemaY, h2, colSpacing * 3 + colWidth, produtoY, h3));
+                path2.setAttribute('fill', problemaPos.color);
+                path2.setAttribute('opacity', '0.4');
+                svg.appendChild(path2);
+            });
+            
+            // Draw doenca bars
+            doencaPositions.forEach((d, i) => {
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', colSpacing - colWidth);
+                rect.setAttribute('y', d.y);
+                rect.setAttribute('width', colWidth);
+                rect.setAttribute('height', d.height);
+                rect.setAttribute('fill', d.color);
+                rect.style.cursor = 'pointer';
+                rect.addEventListener('click', () => {
+                    selectedDoenca = selectedDoenca === d.name ? null : d.name;
+                    renderChart();
+                });
+                rect.addEventListener('mouseenter', (e) => showTooltip(e.clientX, e.clientY, `${d.name}: ${doencas.find(x => x.name === d.name)?.value || 0} etiquetas`));
+                rect.addEventListener('mouseleave', hideTooltip);
+                svg.appendChild(rect);
+                
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', colSpacing - colWidth - 10);
+                text.setAttribute('y', d.y + d.height / 2);
+                text.setAttribute('text-anchor', 'end');
+                text.setAttribute('dominant-baseline', 'middle');
+                text.setAttribute('font-size', '12');
+                text.setAttribute('fill', '#374151');
+                text.textContent = d.name;
+                svg.appendChild(text);
+            });
+            
+            // Draw problema bars
+            problemaPositions.forEach((p, i) => {
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', colSpacing * 2);
+                rect.setAttribute('y', p.y);
+                rect.setAttribute('width', colWidth);
+                rect.setAttribute('height', p.height);
+                rect.setAttribute('fill', p.color);
+                rect.style.cursor = 'pointer';
+                rect.addEventListener('click', () => {
+                    selectedProblema = selectedProblema === p.name ? null : p.name;
+                    renderChart();
+                });
+                rect.addEventListener('mouseenter', (e) => showTooltip(e.clientX, e.clientY, `${p.name}: ${problemas.find(x => x.name === p.name)?.value || 0} etiquetas`));
+                rect.addEventListener('mouseleave', hideTooltip);
+                svg.appendChild(rect);
+                
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', colSpacing * 2 + colWidth / 2);
+                text.setAttribute('y', p.y + p.height / 2);
+                text.setAttribute('text-anchor', 'middle');
+                text.setAttribute('dominant-baseline', 'middle');
+                text.setAttribute('font-size', '12');
+                text.setAttribute('fill', 'white');
+                text.textContent = p.name.length > 20 ? p.name.substring(0, 18) + '...' : p.name;
+                svg.appendChild(text);
+            });
+            
+            // Draw produto bars
+            produtoPositions.forEach((p, i) => {
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', colSpacing * 3 + colWidth);
+                rect.setAttribute('y', p.y);
+                rect.setAttribute('width', colWidth);
+                rect.setAttribute('height', p.height);
+                rect.setAttribute('fill', p.color);
+                rect.style.cursor = 'pointer';
+                rect.addEventListener('mouseenter', (e) => showTooltip(e.clientX, e.clientY, `${p.name}: ${produtos.find(x => x.name === p.name)?.value || 0} etiquetas`));
+                rect.addEventListener('mouseleave', hideTooltip);
+                svg.appendChild(rect);
+                
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', colSpacing * 3 + colWidth * 2 + 10);
+                text.setAttribute('y', p.y + p.height / 2);
+                text.setAttribute('text-anchor', 'start');
+                text.setAttribute('dominant-baseline', 'middle');
+                text.setAttribute('font-size', '12');
+                text.setAttribute('fill', '#374151');
+                text.textContent = p.name;
+                svg.appendChild(text);
+            });
+            
+            // Draw titles
+            const titleDoenca = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            titleDoenca.setAttribute('x', colSpacing - colWidth / 2);
+            titleDoenca.setAttribute('y', 20);
+            titleDoenca.setAttribute('text-anchor', 'middle');
+            titleDoenca.setAttribute('font-size', '14');
+            titleDoenca.setAttribute('font-weight', 'bold');
+            titleDoenca.setAttribute('fill', '#1F2937');
+            titleDoenca.setAttribute('class', 'clickable');
+            titleDoenca.textContent = `Tipo de Doença ${sortDoenca ? '↓' : ''}`;
+            titleDoenca.style.cursor = 'pointer';
+            titleDoenca.addEventListener('click', () => {
+                sortDoenca = !sortDoenca;
+                renderChart();
+            });
+            svg.appendChild(titleDoenca);
+            
+            const titleProblema = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            titleProblema.setAttribute('x', colSpacing * 2 + colWidth / 2);
+            titleProblema.setAttribute('y', 20);
+            titleProblema.setAttribute('text-anchor', 'middle');
+            titleProblema.setAttribute('font-size', '14');
+            titleProblema.setAttribute('font-weight', 'bold');
+            titleProblema.setAttribute('fill', '#1F2937');
+            titleProblema.setAttribute('class', 'clickable');
+            titleProblema.textContent = `Problema de Saúde ${sortProblema ? '↓' : ''}`;
+            titleProblema.style.cursor = 'pointer';
+            titleProblema.addEventListener('click', () => {
+                sortProblema = !sortProblema;
+                renderChart();
+            });
+            svg.appendChild(titleProblema);
+            
+            const titleProduto = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            titleProduto.setAttribute('x', colSpacing * 3 + colWidth * 1.5);
+            titleProduto.setAttribute('y', 20);
+            titleProduto.setAttribute('text-anchor', 'middle');
+            titleProduto.setAttribute('font-size', '14');
+            titleProduto.setAttribute('font-weight', 'bold');
+            titleProduto.setAttribute('fill', '#1F2937');
+            titleProduto.setAttribute('class', 'clickable');
+            titleProduto.textContent = `Produto ${sortProduto ? '↓' : ''}`;
+            titleProduto.style.cursor = 'pointer';
+            titleProduto.addEventListener('click', () => {
+                sortProduto = !sortProduto;
+                renderChart();
+            });
+            svg.appendChild(titleProduto);
+        }
+    </script>
+</body>
+</html>
