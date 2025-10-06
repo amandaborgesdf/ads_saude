@@ -1,0 +1,451 @@
+import React, { useState, useMemo } from 'react';
+import Papa from 'papaparse';
+import { Upload } from 'lucide-react';
+
+const AlluvialChart = () => {
+  const [selectedDoenca, setSelectedDoenca] = useState(null);
+  const [selectedProblema, setSelectedProblema] = useState(null);
+  const [tooltip, setTooltip] = useState(null);
+  const [csvData, setCsvData] = useState(null);
+  const [error, setError] = useState(null);
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setError(null);
+    
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        if (results.data && results.data.length > 0) {
+          const firstRow = results.data[0];
+          const requiredColumns = ['ad_id', 'produto_tratamento_comercializado', 'tipos_problemas_de_saude', 'tipos_problemas_de_saude_agrup'];
+          const hasAllColumns = requiredColumns.every(col => col in firstRow);
+          
+          if (!hasAllColumns) {
+            setError('O CSV deve conter as colunas: ad_id, produto_tratamento_comercializado, tipos_problemas_de_saude, tipos_problemas_de_saude_agrup');
+            return;
+          }
+          
+          setCsvData(results.data);
+        }
+      },
+      error: (err) => {
+        setError(`Erro ao ler o arquivo: ${err.message}`);
+      }
+    });
+  };
+
+  const processedData = useMemo(() => {
+    if (!csvData) return [];
+    
+    const flows = [];
+    
+    csvData.forEach(row => {
+      const problemas = row.tipos_problemas_de_saude.split(';').map(p => p.trim());
+      const doencas = row.tipos_problemas_de_saude_agrup.split(';').map(d => d.trim());
+      const produto = row.produto_tratamento_comercializado.trim();
+      
+      problemas.forEach((problema, idx) => {
+        if (problema && doencas[idx] && produto) {
+          flows.push({
+            doenca: doencas[idx],
+            problema: problema,
+            produto: produto
+          });
+        }
+      });
+    });
+    
+    return flows;
+  }, [csvData]);
+
+  const aggregatedData = useMemo(() => {
+    const counts = {};
+    
+    processedData.forEach(flow => {
+      const key = `${flow.doenca}|||${flow.problema}|||${flow.produto}`;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    
+    return Object.entries(counts).map(([key, count]) => {
+      const [doenca, problema, produto] = key.split('|||');
+      return { doenca, problema, produto, count };
+    });
+  }, [processedData]);
+
+  const filteredData = useMemo(() => {
+    return aggregatedData.filter(d => {
+      if (selectedDoenca && d.doenca !== selectedDoenca) return false;
+      if (selectedProblema && d.problema !== selectedProblema) return false;
+      return true;
+    });
+  }, [aggregatedData, selectedDoenca, selectedProblema]);
+
+  const flowPositions = useMemo(() => {
+    const doencaFlows = {};
+    const problemaFlows = {};
+    const produtoFlows = {};
+    
+    filteredData.forEach(flow => {
+      if (!doencaFlows[flow.doenca]) doencaFlows[flow.doenca] = 0;
+      if (!problemaFlows[flow.problema]) problemaFlows[flow.problema] = 0;
+      if (!produtoFlows[flow.produto]) produtoFlows[flow.produto] = 0;
+    });
+    
+    const flows = filteredData.map(flow => {
+      const doencaStart = doencaFlows[flow.doenca];
+      const problemaStart = problemaFlows[flow.problema];
+      const produtoStart = produtoFlows[flow.produto];
+      
+      doencaFlows[flow.doenca] += flow.count;
+      problemaFlows[flow.problema] += flow.count;
+      produtoFlows[flow.produto] += flow.count;
+      
+      return {
+        ...flow,
+        doencaStart,
+        problemaStart,
+        produtoStart
+      };
+    });
+    
+    return flows;
+  }, [filteredData]);
+
+  const doencas = useMemo(() => {
+    const map = {};
+    filteredData.forEach(d => {
+      map[d.doenca] = (map[d.doenca] || 0) + d.count;
+    });
+    return Object.entries(map).map(([name, value]) => ({ name, value }));
+  }, [filteredData]);
+
+  const problemas = useMemo(() => {
+    const map = {};
+    filteredData.forEach(d => {
+      map[d.problema] = (map[d.problema] || 0) + d.count;
+    });
+    return Object.entries(map).map(([name, value]) => ({ name, value }));
+  }, [filteredData]);
+
+  const produtos = useMemo(() => {
+    const map = {};
+    filteredData.forEach(d => {
+      map[d.produto] = (map[d.produto] || 0) + d.count;
+    });
+    return Object.entries(map).map(([name, value]) => ({ name, value }));
+  }, [filteredData]);
+
+  const totalDoenca = doencas.reduce((sum, d) => sum + d.value, 0);
+  const totalProblema = problemas.reduce((sum, d) => sum + d.value, 0);
+  const totalProduto = produtos.reduce((sum, d) => sum + d.value, 0);
+
+  const colors = {
+    doenca: ['#3b82f6', '#2563eb', '#1d4ed8', '#1e40af', '#1e3a8a'],
+    problema: ['#10b981', '#059669', '#047857', '#065f46', '#064e3b'],
+    produto: ['#f59e0b', '#d97706', '#b45309', '#92400e', '#78350f']
+  };
+
+  const getColor = (type, index) => {
+    return colors[type][index % colors[type].length];
+  };
+
+  const drawFlow = (x1, y1, h1, x2, y2, h2, color, opacity = 0.4) => {
+    const midX = (x1 + x2) / 2;
+    return (
+      <path
+        d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2} L ${x2} ${y2 + h2} C ${midX} ${y2 + h2}, ${midX} ${y1 + h1}, ${x1} ${y1 + h1} Z`}
+        fill={color}
+        opacity={opacity}
+        className="transition-all duration-300"
+      />
+    );
+  };
+
+  const width = 1200;
+  const height = 800;
+  const colWidth = 150;
+  const colSpacing = 300;
+  const padding = 50;
+
+  let doencaY = padding;
+  const doencaPositions = doencas.map((d, i) => {
+    const h = (d.value / totalDoenca) * (height - 2 * padding);
+    const pos = { name: d.name, y: doencaY, height: h, color: getColor('doenca', i) };
+    doencaY += h + 5;
+    return pos;
+  });
+
+  let problemaY = padding;
+  const problemaPositions = problemas.map((p, i) => {
+    const h = (p.value / totalProblema) * (height - 2 * padding);
+    const pos = { name: p.name, y: problemaY, height: h, color: getColor('problema', i) };
+    problemaY += h + 5;
+    return pos;
+  });
+
+  let produtoY = padding;
+  const produtoPositions = produtos.map((p, i) => {
+    const h = (p.value / totalProduto) * (height - 2 * padding);
+    const pos = { name: p.name, y: produtoY, height: h, color: getColor('produto', i) };
+    produtoY += h + 5;
+    return pos;
+  });
+
+  if (!csvData) {
+    return (
+      <div className="w-full h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-8">
+        <div className="bg-white rounded-2xl shadow-2xl p-12 max-w-2xl w-full">
+          <div className="text-center">
+            <Upload className="w-20 h-20 mx-auto text-blue-500 mb-6" />
+            <h1 className="text-3xl font-bold text-gray-800 mb-4">
+              Análise de Produtos de Saúde
+            </h1>
+            <p className="text-gray-600 mb-8">
+              Faça upload do seu arquivo CSV para visualizar o gráfico alluvial interativo
+            </p>
+            
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-8 text-left">
+              <h3 className="font-bold text-blue-900 mb-3">Formato do CSV requerido:</h3>
+              <ul className="text-sm text-blue-800 space-y-2">
+                <li>• <strong>ad_id</strong>: ID da etiqueta</li>
+                <li>• <strong>produto_tratamento_comercializado</strong>: Nome do produto</li>
+                <li>• <strong>tipos_problemas_de_saude</strong>: Problemas de saúde (separados por ;)</li>
+                <li>• <strong>tipos_problemas_de_saude_agrup</strong>: Tipos de doenças (separados por ;)</li>
+              </ul>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
+                <p className="text-red-700 text-sm">{error}</p>
+              </div>
+            )}
+            
+            <label className="inline-block">
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+              <span className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-8 py-4 rounded-lg cursor-pointer inline-flex items-center gap-3 transition shadow-lg hover:shadow-xl">
+                <Upload className="w-5 h-5" />
+                Selecionar Arquivo CSV
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-screen bg-gray-50 p-8 overflow-auto">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-3xl font-bold text-gray-800">
+            Análise de Produtos de Saúde
+          </h1>
+          <label>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+            <span className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg cursor-pointer inline-flex items-center gap-2 transition text-sm">
+              <Upload className="w-4 h-4" />
+              Carregar Novo CSV
+            </span>
+          </label>
+        </div>
+        
+        <div className="flex gap-4 mb-6">
+          <button
+            onClick={() => { setSelectedDoenca(null); setSelectedProblema(null); }}
+            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition"
+          >
+            Limpar Filtros
+          </button>
+          
+          {selectedDoenca && (
+            <div className="px-4 py-2 bg-blue-100 text-blue-800 rounded flex items-center gap-2">
+              Doença: {selectedDoenca}
+              <button onClick={() => setSelectedDoenca(null)} className="font-bold">×</button>
+            </div>
+          )}
+          
+          {selectedProblema && (
+            <div className="px-4 py-2 bg-green-100 text-green-800 rounded flex items-center gap-2">
+              Problema: {selectedProblema}
+              <button onClick={() => setSelectedProblema(null)} className="font-bold">×</button>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-lg shadow-lg p-6 overflow-x-auto">
+          <svg width={width} height={height} className="mx-auto">
+            {flowPositions.map((flow, i) => {
+              const doencaPos = doencaPositions.find(d => d.name === flow.doenca);
+              const problemaPos = problemaPositions.find(p => p.name === flow.problema);
+              const produtoPos = produtoPositions.find(p => p.name === flow.produto);
+              
+              if (!doencaPos || !problemaPos || !produtoPos) return null;
+              
+              const h1 = (flow.count / totalDoenca) * (height - 2 * padding);
+              const h2 = (flow.count / totalProblema) * (height - 2 * padding);
+              const h3 = (flow.count / totalProduto) * (height - 2 * padding);
+              
+              const doencaY = doencaPos.y + (flow.doencaStart / totalDoenca) * (height - 2 * padding);
+              const problemaY = problemaPos.y + (flow.problemaStart / totalProblema) * (height - 2 * padding);
+              const produtoY = produtoPos.y + (flow.produtoStart / totalProduto) * (height - 2 * padding);
+              
+              return (
+                <g key={i}>
+                  {drawFlow(
+                    colSpacing, doencaY, h1,
+                    colSpacing * 2, problemaY, h2,
+                    doencaPos.color
+                  )}
+                  {drawFlow(
+                    colSpacing * 2 + colWidth, problemaY, h2,
+                    colSpacing * 3 + colWidth, produtoY, h3,
+                    problemaPos.color
+                  )}
+                </g>
+              );
+            })}
+            
+            {doencaPositions.map((d, i) => (
+              <g key={`doenca-${i}`}>
+                <rect
+                  x={colSpacing - colWidth}
+                  y={d.y}
+                  width={colWidth}
+                  height={d.height}
+                  fill={d.color}
+                  className="cursor-pointer hover:opacity-80 transition"
+                  onClick={() => setSelectedDoenca(selectedDoenca === d.name ? null : d.name)}
+                  onMouseEnter={(e) => setTooltip({ 
+                    x: e.clientX, 
+                    y: e.clientY, 
+                    text: `${d.name}: ${doencas.find(x => x.name === d.name)?.value || 0} etiquetas` 
+                  })}
+                  onMouseLeave={() => setTooltip(null)}
+                />
+                <text
+                  x={colSpacing - colWidth - 10}
+                  y={d.y + d.height / 2}
+                  textAnchor="end"
+                  dominantBaseline="middle"
+                  className="text-xs fill-gray-700 font-medium pointer-events-none"
+                >
+                  {d.name}
+                </text>
+              </g>
+            ))}
+            
+            {problemaPositions.map((p, i) => (
+              <g key={`problema-${i}`}>
+                <rect
+                  x={colSpacing * 2}
+                  y={p.y}
+                  width={colWidth}
+                  height={p.height}
+                  fill={p.color}
+                  className="cursor-pointer hover:opacity-80 transition"
+                  onClick={() => setSelectedProblema(selectedProblema === p.name ? null : p.name)}
+                  onMouseEnter={(e) => setTooltip({ 
+                    x: e.clientX, 
+                    y: e.clientY, 
+                    text: `${p.name}: ${problemas.find(x => x.name === p.name)?.value || 0} etiquetas` 
+                  })}
+                  onMouseLeave={() => setTooltip(null)}
+                />
+                <text
+                  x={colSpacing * 2 + colWidth / 2}
+                  y={p.y + p.height / 2}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  className="text-xs fill-white font-medium pointer-events-none"
+                >
+                  {p.name.length > 20 ? p.name.substring(0, 18) + '...' : p.name}
+                </text>
+              </g>
+            ))}
+            
+            {produtoPositions.map((p, i) => (
+              <g key={`produto-${i}`}>
+                <rect
+                  x={colSpacing * 3 + colWidth}
+                  y={p.y}
+                  width={colWidth}
+                  height={p.height}
+                  fill={p.color}
+                  className="hover:opacity-80 transition cursor-pointer"
+                  onMouseEnter={(e) => setTooltip({ 
+                    x: e.clientX, 
+                    y: e.clientY, 
+                    text: `${p.name}: ${produtos.find(x => x.name === p.name)?.value || 0} etiquetas` 
+                  })}
+                  onMouseLeave={() => setTooltip(null)}
+                />
+                <text
+                  x={colSpacing * 3 + colWidth * 2 + 10}
+                  y={p.y + p.height / 2}
+                  textAnchor="start"
+                  dominantBaseline="middle"
+                  className="text-xs fill-gray-700 font-medium pointer-events-none"
+                >
+                  {p.name}
+                </text>
+              </g>
+            ))}
+            
+            <text x={colSpacing - colWidth / 2} y={20} textAnchor="middle" className="text-sm font-bold fill-gray-800">
+              Tipo de Doença
+            </text>
+            <text x={colSpacing * 2 + colWidth / 2} y={20} textAnchor="middle" className="text-sm font-bold fill-gray-800">
+              Problema de Saúde
+            </text>
+            <text x={colSpacing * 3 + colWidth * 1.5} y={20} textAnchor="middle" className="text-sm font-bold fill-gray-800">
+              Produto
+            </text>
+          </svg>
+        </div>
+
+        <div className="mt-6 grid grid-cols-3 gap-4 text-sm">
+          <div className="bg-blue-50 p-4 rounded">
+            <h3 className="font-bold text-blue-900 mb-2">Tipos de Doença</h3>
+            <p className="text-blue-700">Total: {doencas.length} categorias</p>
+          </div>
+          <div className="bg-green-50 p-4 rounded">
+            <h3 className="font-bold text-green-900 mb-2">Problemas de Saúde</h3>
+            <p className="text-green-700">Total: {problemas.length} tipos</p>
+          </div>
+          <div className="bg-orange-50 p-4 rounded">
+            <h3 className="font-bold text-orange-900 mb-2">Produtos</h3>
+            <p className="text-orange-700">Total: {produtos.length} produtos</p>
+          </div>
+        </div>
+      </div>
+      
+      {tooltip && (
+        <div
+          className="fixed bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg text-sm pointer-events-none z-50"
+          style={{
+            left: tooltip.x + 10,
+            top: tooltip.y + 10,
+          }}
+        >
+          {tooltip.text}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AlluvialChart;
